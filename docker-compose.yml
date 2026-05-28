@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  node1:
+    build: .
+    volumes:
+      - ./node1_data:/app/shared_folder
+    environment:
+      - NODE_NAME=Node1
+    networks:
+      - p2p_net
+
+  node2:
+    build: .
+    volumes:
+      - ./node2_data:/app/shared_folder
+    environment:
+      - NODE_NAME=Node2
+    networks:
+      - p2p_net
+
+  node3:
+    build: .
+    volumes:
+      - ./node3_data:/app/shared_folder
+    environment:
+      - NODE_NAME=Node3
+    networks:
+      - p2p_net
+
+networks:
+  p2p_net:
+    driver: bridge
