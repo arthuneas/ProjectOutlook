@@ -1,36 +1,33 @@
-import socket
-import threading
-from config import TCP_PORT
-from ui.cli import log_info
+"""
+tcp_server.py — Servidor TCP para receber conexões de outros nós.
 
-class TCPServer:
-    def __init__(self):
-        self.port = TCP_PORT
+Responsabilidades:
+  1. Escutar na porta TCP por conexões de outros nós
+  2. Aceitar conexões e criar thread separada para cada cliente
+  3. Receber mensagens usando framing do protocol.py (recv_message)
+  4. Rotear cada mensagem para o handler correto baseado no 'type'
+  5. Responder adequadamente (ex: enviar arquivo quando receber FILE_REQUEST)
 
-    def start(self):
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.bind(('0.0.0.0', self.port))
-        server.listen(5)
-        log_info(f"Servidor TCP escutando na porta {self.port}...")
-        
-        while True:
-            client_socket, addr = server.accept()
-            log_info(f"Conexão TCP aceita de {addr}")
-            handler = threading.Thread(
-                target=self._handle_client, 
-                args=(client_socket, addr), 
-                daemon=True
-            )
-            handler.start()
+Handlers a implementar:
+  - _handle_index_exchange(msg, sock) → recebe índice remoto, compara, troca arquivos
+  - _handle_file_request(msg, sock) → lê arquivo e envia em chunks
+  - _handle_file_notify(msg, sock) → recebe notificação de alteração
+  - _handle_delete_notify(msg, sock) → recebe notificação de deleção
+  - _handle_heartbeat(msg, sock) → responde com HEARTBEAT_ACK
 
-    def _handle_client(self, client_socket, addr):
-        try:
-            # Lógica para receber mensagens e lidar com requisições
-            # Ex: trocar índice de arquivos, transferir chunks de arquivos.
-            data = client_socket.recv(1024)
-            if data:
-                log_info(f"Mensagem recebida: {data.decode('utf-8')}")
-        except Exception as e:
-            log_info(f"Erro na conexão com {addr}: {e}")
-        finally:
-            client_socket.close()
+TODO (Grupo):
+  - Implementar TCPServer que recebe referências para state_db, file_manager, reconciler
+  - Implementar start() — bind, listen, accept loop
+  - Implementar _handle_client(sock, addr) — recv_message + switch no type
+  - Implementar cada handler individualmente
+  - IMPORTANTE: usar protocol.recv_message() para ler (com framing!)
+  - IMPORTANTE: NÃO fechar conexão após 1 mensagem se houver conversa multi-mensagem
+"""
+
+# import socket
+# import threading
+# from config import TCP_PORT
+
+# class TCPServer:
+#     def __init__(self, state_db, file_manager, reconciler, discovery):
+#         ...

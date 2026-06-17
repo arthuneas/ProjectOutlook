@@ -2,17 +2,15 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Copia e instala dependências (se houver requirements.txt no futuro)
-# COPY requirements.txt .
-# RUN pip install -r requirements.txt
+# Instala dependências
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Para a biblioteca watchdog
-RUN pip install watchdog
-
+# Copia código-fonte
 COPY src/ ./src/
 
-# Define a pasta compartilhada
+# Cria pasta compartilhada
 RUN mkdir -p /app/shared_folder
 
-# Comando padrão
+# Flag -u desabilita buffering do stdout (logs em tempo real)
 CMD ["python", "-u", "src/main.py"]

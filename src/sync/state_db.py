@@ -1,30 +1,38 @@
-import json
-import os
-from config import DB_PATH
+"""
+state_db.py — Banco de dados de estado local (persistência do índice de arquivos).
 
-class StateDB:
-    def __init__(self):
-        self.db_path = DB_PATH
-        if not os.path.exists(self.db_path):
-            self._save_state({})
-            
-    def _load_state(self):
-        with open(self.db_path, 'r') as f:
-            return json.load(f)
+Responsabilidades:
+  1. Persistir o estado de cada arquivo: nome, hash, timestamp, tamanho, status
+  2. Fornecer o índice completo para troca com outros nós (INDEX_EXCHANGE)
+  3. Atualizar estado individual de arquivos
+  4. Marcar arquivos como DELETED (tombstone) — NÃO REMOVER do banco
+  5. Thread-safe: proteger leitura/escrita com Lock
 
-    def _save_state(self, state):
-        with open(self.db_path, 'w') as f:
-            json.dump(state, f, indent=4)
+TOMBSTONES (IMPORTANTE):
+  Quando um arquivo é deletado, NÃO remova a entrada do banco.
+  Mude o status para "DELETED" e atualize o timestamp.
+  Se você remover, na próxima INDEX_EXCHANGE o nó vai pensar que
+  não conhece o arquivo e vai baixá-lo de novo — desfazendo a deleção!
 
-    def get_file_state(self, filename):
-        state = self._load_state()
-        return state.get(filename)
+OPÇÕES DE IMPLEMENTAÇÃO:
+  Opção A: Arquivo JSON simples (mais fácil, mas menos robusto)
+  Opção B: SQLite (mais robusto, recomendado — usa sqlite3 da stdlib)
 
-    def update_file_state(self, filename, hash_val, timestamp, status="ACTIVE"):
-        state = self._load_state()
-        state[filename] = {
-            "hash": hash_val,
-            "timestamp": timestamp,
-            "status": status
-        }
-        self._save_state(state)
+TODO (Grupo):
+  - Implementar StateDB com Lock para thread-safety
+  - Implementar get_full_index() → dict completo para INDEX_EXCHANGE
+  - Implementar get_file_state(filename) → dados de um arquivo
+  - Implementar update_file_state(filename, hash, timestamp, size, status='ACTIVE')
+  - Implementar mark_deleted(filename, timestamp)
+  - Implementar file_exists(filename) → bool (apenas ACTIVE)
+  - Implementar get_active_files() → lista de filenames ativos
+"""
+
+# import json
+# import os
+# import threading
+# from config import DB_PATH
+
+# class StateDB:
+#     def __init__(self):
+#         ...

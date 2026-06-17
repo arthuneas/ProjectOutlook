@@ -6,11 +6,13 @@ __pycache__/
 # IDEs
 .vscode/
 .idea/
+.gemini/
 
 # Dados Locais (Não devem ir para o repositório)
 shared_folder/
 node1_data/
 node2_data/
 node3_data/
+state.json
 *.sqlite3
 *.db

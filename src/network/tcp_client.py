@@ -1,18 +1,25 @@
-import socket
-import json
-from ui.cli import log_info, log_error
+"""
+tcp_client.py — Cliente TCP para enviar mensagens ativamente para outros nós.
 
-class TCPClient:
-    @staticmethod
-    def send_message(ip, port, message_dict):
-        try:
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.connect((ip, port))
-            msg = json.dumps(message_dict)
-            client.send(msg.encode('utf-8'))
-            log_info(f"Mensagem enviada para {ip}:{port}")
-            client.close()
-            return True
-        except Exception as e:
-            log_error(f"Falha ao enviar mensagem para {ip}:{port} -> {e}")
-            return False
+Responsabilidades:
+  1. Conectar a um nó remoto via TCP
+  2. Enviar mensagens usando framing do protocol.py (send_message)
+  3. Opcionalmente aguardar resposta (send_and_receive)
+  4. Solicitar e receber arquivos (request_file)
+
+TODO (Grupo):
+  - Implementar send_message(ip, port, msg_dict) — conecta, envia com framing, fecha
+  - Implementar send_and_receive(ip, port, msg_dict) — conecta, envia, espera resposta
+  - Implementar request_file(ip, port, filename, save_path) — envia FILE_REQUEST, recebe chunks
+  - Implementar send_index(ip, port, local_index) — envia INDEX_EXCHANGE
+  - IMPORTANTE: usar socket.settimeout(10) para evitar bloqueios infinitos
+  - IMPORTANTE: implementar retry com backoff exponencial (2s, 4s, 8s, max 3 tentativas)
+"""
+
+# import socket
+# import json
+
+# class TCPClient:
+#     @staticmethod
+#     def send_message(ip, port, msg_dict):
+#         ...
