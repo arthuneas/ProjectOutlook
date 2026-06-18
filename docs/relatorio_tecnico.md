@@ -2,13 +2,13 @@
 
 ## 1. Capa
 - **Disciplina:** Redes de Computadores
-- **Professor:** [Nome do Professor]
+- **Professor:** Roberto Vito Rodrigues Filho
 - **Integrantes:**
-  - [Nome 1] — [Matrícula]
-  - [Nome 2] — [Matrícula]
-  - [Nome 3] — [Matrícula]
-  - [Nome 4] — [Matrícula]
-- **Data:** [Data de entrega]
+  - Arthur Santos Almeida - 242009990
+  - Carlos Roberto Da Silva Oliveira - 251004385
+  - Giovanna Sperandio David - 2520386461
+  - Gabriel Menezes de Araujo - 241020803
+- **Data:** Junho 2026
 
 ---
 
