@@ -43,9 +43,12 @@ MSG_NODE_LEAVING = "NODE_LEAVING"
 
 # TODO: Implementar as funções abaixo
 
-# def build_message(msg_type, **kwargs):
-#     """Constrói um dicionário de mensagem com o tipo e campos extras."""
+def build_message(msg_type, **kwargs):
+#     """Constrói um dicionário de mensagem com o tipo e campos extras.""
 #     ...
+  msg = {"type": msg_type}
+  msg.update(kwargs)
+  return msg
 
 # def send_message(sock, msg_dict):
 #     """Serializa msg_dict para JSON, adiciona header de 4 bytes com tamanho, envia pelo socket."""
@@ -58,3 +61,7 @@ MSG_NODE_LEAVING = "NODE_LEAVING"
 # def recv_exact(sock, n):
 #     """Lê exatamente N bytes do socket (loop até completar)."""
 #     ...
+
+
+
+
