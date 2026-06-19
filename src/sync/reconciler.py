@@ -23,26 +23,44 @@ LÓGICA DE COMPARAÇÃO:
   Para cada arquivo LOCAL que NÃO está no remoto:
     → O remoto precisa baixar de mim (upload)
 
-TODO (Grupo):
-  - Implementar compare_indices(local_index, remote_index) → 3 listas
-  - Implementar resolve_conflict(local_state, remote_state) → 'LOCAL'|'REMOTE'|'EQUAL'
-  - Tratar caso de deleção: se remoto tem DELETED com timestamp > local → deletar
 """
 
-# class Reconciler:
-#     @staticmethod
-#     def compare_indices(local_index, remote_index):
-#         """
-#         Compara dois índices e retorna:
-#           files_to_download: list[str] — arquivos para baixar do remoto
-#           files_to_upload: list[str] — arquivos para enviar ao remoto
-#           files_to_delete: list[str] — arquivos para deletar localmente
-#         """
-#         ...
-#
-#     @staticmethod
-#     def resolve_conflict(local_state, remote_state):
-#         """
-#         Retorna 'LOCAL', 'REMOTE' ou 'EQUAL'.
-#         """
-#         ...
+class Reconciler:
+           
+      #compara o timestamp de ambos os arquivos, aquele que tiver o timestamp mais recente será considerado
+      #caso, os tempos sejam muito parecidos, o node_id será comparado alfabeticamente
+     @staticmethod
+     def resolve_conflict(local_state, remote_state, local_node_id, remote_node_id):
+         #agora faremos a lógica do timestamps e retornar de acordo
+         
+        if local_state["timestamp"] > remote_state["timestamp"]:
+            return "LOCAL"
+
+        elif local_state["timestamp"] < remote_state["timestamp"]:
+            return "REMOTE"         
+          
+        else:
+          #por segurança, há a verificação do ID dos nós
+          if local_node_id > remote_node_id:
+              return "LOCAL"
+            
+          elif local_node_id < remote_node_id:
+            return "REMOTE"
+        
+          else: 
+            return "EQUAL"
+         
+         
+         
+
+      #avalia todos os arquivos mapeados de uma vez, cruza os indices dos computadores. A partir disso, identifica o que foi alterado, o que é novo e excluído.
+      #se haver tiver divergência no mesmo arquivo, chama o resolve_conflit e resolve o conflito. No fim, distribui o resultado final em três listas.
+     @staticmethod
+     def compare_indices(local_index, remote_index):
+         """
+         Compara dois índices e retorna:
+           files_to_download: list[str] — arquivos para baixar do remoto
+           files_to_upload: list[str] — arquivos para enviar ao remoto
+           files_to_delete: list[str] — arquivos para deletar localmente
+         """
+        
