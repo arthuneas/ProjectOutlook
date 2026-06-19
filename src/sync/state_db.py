@@ -90,7 +90,7 @@ class StateDB:
             self.conn.commit()
             
             
-    def get_file_name(self, filename):
+    def get_file_state(self, filename):
       with self.lock:
           cursor = self.conn.cursor()
           
