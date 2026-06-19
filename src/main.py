@@ -1,4 +1,5 @@
 """
+
 main.py — Ponto de entrada e orquestrador do nó SyncP2P.
 
 Este é o "cola" que conecta todos os módulos:

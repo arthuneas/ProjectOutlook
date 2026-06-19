@@ -40,6 +40,6 @@ def log_error(msg):
 def log_warn(msg):
   print(f"{YELLOW} [{get_Time()}] [{NODE_NAME}] [WARN] {msg} {RESET}")
 
-
+#informa que é uma sincronicidade
 def log_sync(msg):
   print(f"{CYAN} [{get_Time()}] [{NODE_NAME}] [SYNC] {msg} {RESET}")
