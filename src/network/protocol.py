@@ -26,8 +26,6 @@ TODO (Grupo):
 
 import json
 import struct
-import os
-import cli
 
 # ─── Constantes de Tipos de Mensagens ───────────────────────────────
 MSG_HELLO = "HELLO"
@@ -48,49 +46,44 @@ TIME_LIMIT = 10.0 #10 segundo de tempo maximo de espera para envio de pacotes
 # TODO: Implementar as funções abaixo
 
 def build_message(msg_type, **kwargs):
-#Constrói um dicionário de mensagem com o tipo e campos extras.
-  msg = {"type": msg_type} 
-  msg.update(kwargs) #adiciona outros campos passados na função
-  return msg
+    """Constrói um dicionário de mensagem com o tipo e campos extras."""
+    msg = {"type": msg_type}
+    msg.update(kwargs)  # adiciona outros campos passados na função
+    return msg
 
 
 def send_message(sock, msg_dict):
-#Serializa msg_dict para JSON, adiciona header de 4 bytes com tamanho, envia pelo socket."""
-    txt = json.dumps(msg_dict).encode("utf-8") #pegamos o json e transformamos em bytes para enviar 
-    tam = len(txt) #pegamos o tamanho de txt
-    header = struct.pack(">I", tam) #pegamos o tamanho em bytes, transformamos em um header de 4 bytes e empacota
-    sock.sendall(header + txt) #fazemos o envio completo as informações
+    """Serializa msg_dict para JSON, adiciona header de 4 bytes com tamanho, envia pelo socket."""
+    txt = json.dumps(msg_dict).encode("utf-8") # transforma o dict em bytes JSON para enviar
+    tam = len(txt)                              # tamanho do payload em bytes
+    header = struct.pack(">I", tam)             # empacota tamanho em 4 bytes big-endian
+    sock.sendall(header + txt)                  # envia header + payload de uma vez
 
 
 def recv_message(sock):
-#Lê header de 4 bytes, depois lê N bytes do payload, desserializa JSON.
+    """Lê header de 4 bytes, depois lê N bytes do payload, desserializa JSON."""
     header = recv_exact(sock, 4)
-    
-    if len(header) != 4: 
-      raise EOFError() #caso o header não seja lido completamente 
 
-    tam = struct.unpack(">I",header)[0] #transforma o header de bytes para int e desempacota
+    if len(header) != 4:
+        raise EOFError("Header incompleto recebido")
 
-    payload = recv_exact(sock, tam) #payload = json em bytes, junta todos os pedaços
-    return json.loads(payload.decode("utf-8")) #transforma em dicionário e retorna
-    
-    
+    tam = struct.unpack(">I", header)[0]  # desempacota tamanho do payload
+
+    payload = recv_exact(sock, tam)       # lê exatamente tam bytes
+    return json.loads(payload.decode("utf-8"))  # desserializa JSON e retorna dict
+
 
 def recv_exact(sock, n):
-#Lê exatamente N bytes do socket (loop até completar), faz o envio completo as informações 
+    """Lê exatamente N bytes do socket (loop até completar)."""
+    sock.settimeout(TIME_LIMIT)  # tempo máximo de espera por dados no buffer
 
-    if (n > MAX_BYTES):
-      raise ValueError(f"Tamanho da mensagem {n} bytes é acima do limite de {MAX_BYTES} bytess.")
-    
-    sock.settimeout(TIME_LIMIT) #define tempo maximo de 10 segundos para o envio de pacotes no buffer
+    buffer = bytearray()  # buffer temporário para acumular bytes recebidos
 
-    buffer = bytearray() #vetor temporarios e vazio para recebimento dos bytes
-    
-    while len(buffer) < n: #loop de leitura
-        remaining = n - len(buffer) #
+    while len(buffer) < n:  # loop até ter todos os N bytes
+        remaining = n - len(buffer)
         data = sock.recv(remaining)
         if not data:
             raise EOFError("Conexão fechada inesperadamente")
         buffer.extend(data)
 
-    return bytes(buffer) #retorna os n bytes 
+    return bytes(buffer)  # retorna os N bytes completos
