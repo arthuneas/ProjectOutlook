@@ -26,6 +26,8 @@ TODO (Grupo):
 
 import json
 import struct
+import os
+import cli
 
 # ─── Constantes de Tipos de Mensagens ───────────────────────────────
 MSG_HELLO = "HELLO"
@@ -40,6 +42,8 @@ MSG_DELETE_NOTIFY = "DELETE_NOTIFY"
 MSG_HEARTBEAT = "HEARTBEAT"
 MSG_HEARTBEAT_ACK = "HEARTBEAT_ACK"
 MSG_NODE_LEAVING = "NODE_LEAVING"
+MAX_BYTES = 8192 #8kb
+TIME_LIMIT = 10.0 #10 segundo de tempo maximo de espera para envio de pacotes
 
 # TODO: Implementar as funções abaixo
 
@@ -54,45 +58,39 @@ def send_message(sock, msg_dict):
 #Serializa msg_dict para JSON, adiciona header de 4 bytes com tamanho, envia pelo socket."""
     txt = json.dumps(msg_dict).encode("utf-8") #pegamos o json e transformamos em bytes para enviar 
     tam = len(txt) #pegamos o tamanho de txt
-    header = struct.pack(">I", tam) #pegamos o tamanho em bytes e transformamos em um header de 4 bytes
+    header = struct.pack(">I", tam) #pegamos o tamanho em bytes, transformamos em um header de 4 bytes e empacota
     sock.sendall(header + txt) #fazemos o envio completo as informações
 
 
 def recv_message(sock):
 #Lê header de 4 bytes, depois lê N bytes do payload, desserializa JSON.
-    header = sock.recv(4)
+    header = recv_exact(sock, 4)
     
     if len(header) != 4: 
       raise EOFError() #caso o header não seja lido completamente 
 
-    tam = struct.unpack(">I",header)[0] #transforma o header de bytes para int
+    tam = struct.unpack(">I",header)[0] #transforma o header de bytes para int e desempacota
 
-    chunks = [] #cria uma lista vazia para receber os chunks
-    bytes_recebidos = 0 #inicia com 0 bytes recebidos
-
-    while bytes_recebidos < tam: #loop até receber o tamanho total do payload
-        chunk = sock.recv(tam - bytes_recebidos) #chuck = tamanho da mensagem - o que ja foi lido
-        
-        if not chunk: # se não receber nada, o socket foi fechado
-            raise EOFError("Conexão fechada inesperadamente durante o recebimento da mensagem")
-        chunks.append(chunk) #adiciona o chunk na lista
-        bytes_recebidos += len(chunk) # soma o tamanho do chunk ao total de bytes recebidos
-
-    payload = b"".join(chunks) #payload = json em bytes, junta todos os pedaços
+    payload = recv_exact(sock, tam) #payload = json em bytes, junta todos os pedaços
     return json.loads(payload.decode("utf-8")) #transforma em dicionário e retorna
     
     
+
 def recv_exact(sock, n):
 #Lê exatamente N bytes do socket (loop até completar), faz o envio completo as informações 
-    buffer = bytearray() 
-    while len(buffer) < n:
-        remaining = n - len(buffer)
+
+    if (n > MAX_BYTES):
+      raise ValueError(f"Tamanho da mensagem {n} bytes é acima do limite de {MAX_BYTES} bytess.")
+    
+    sock.settimeout(TIME_LIMIT) #define tempo maximo de 10 segundos para o envio de pacotes no buffer
+
+    buffer = bytearray() #vetor temporarios e vazio para recebimento dos bytes
+    
+    while len(buffer) < n: #loop de leitura
+        remaining = n - len(buffer) #
         data = sock.recv(remaining)
         if not data:
             raise EOFError("Conexão fechada inesperadamente")
         buffer.extend(data)
-    return bytes(buffer)
 
-
-
-
+    return bytes(buffer) #retorna os n bytes 

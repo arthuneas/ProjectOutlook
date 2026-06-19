@@ -21,9 +21,8 @@ from datetime import datetime
 from src.config import NODE_NAME
 
 #função para retornar o datetime
-def get_Time():
+def getTime():
   return datetime.now().strftime("%H:%M:%S")
-
 
 
 #informa que é uma mensagem de sucesso
