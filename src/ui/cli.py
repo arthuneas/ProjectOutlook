@@ -18,7 +18,7 @@ CYAN = '\033[96m'
 RESET = '\033[0m'
 
 from datetime import datetime
-from src.config import NODE_NAME
+from config import NODE_NAME
 
 #função para retornar o datetime
 def getTime():
