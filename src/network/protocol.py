@@ -6,22 +6,6 @@ Este módulo centraliza:
   2. Funções para construir mensagens (build_message)
   3. Funções para serializar/desserializar com framing TCP (send_message, recv_message)
 
-FRAMING TCP (Length-Prefix):
-  ┌────────────────┬──────────────────────┐
-  │ 4 bytes (BE)   │ N bytes              │
-  │ tamanho payload│ JSON UTF-8 payload   │
-  └────────────────┴──────────────────────┘
-
-  - Usar struct.pack('>I', tamanho) para empacotar o header
-  - Usar struct.unpack('>I', header) para desempacotar
-  - recv_exact(sock, n) deve ler exatamente N bytes do socket
-
-TODO (Grupo):
-  - Definir todas as constantes MSG_*
-  - Implementar build_message() com validação de campos
-  - Implementar send_message(sock, msg_dict) com framing
-  - Implementar recv_message(sock) com framing
-  - Implementar recv_exact(sock, n) — loop até ler N bytes
 """
 
 import json
