@@ -156,17 +156,17 @@ ProjectOutlook/
 
 | Arquivo | Responsabilidade | Quem pode implementar |
 |---|---|---|
-| `config.py` | Centraliza TODAS as constantes (portas, caminhos, UUID do nó) | Qualquer um (rápido) |
-| `protocol.py` | Define os tipos de mensagem, funções `build_message()` e `parse_message()`, e o **framing TCP** | Integrante A |
+| `config.py` | Centraliza TODAS as constantes (portas, caminhos, UUID do nó) | PRONTO |
+| `protocol.py` | Define os tipos de mensagem, funções `build_message()` e `parse_message()`, e o **framing TCP** | PRONTO |
 | `discovery.py` | Broadcast UDP, escuta de peers, manutenção da lista `known_nodes`, heartbeat periódico | Integrante A |
 | `tcp_server.py` | Escuta na porta TCP, aceita conexões, faz parse da mensagem e **roteia** para o handler correto | Integrante B |
 | `tcp_client.py` | Conecta a um peer via TCP e envia uma mensagem (com framing) | Integrante B |
 | `watcher.py` | Usa `watchdog` para detectar criação, modificação e deleção de arquivos na `shared_folder` | Integrante C |
-| `file_manager.py` | Calcula hash SHA-256, lê arquivos em chunks, escreve arquivos recebidos | Integrante C |
-| `state_db.py` | Persiste e consulta o estado de cada arquivo (nome, hash, timestamp, status) | Integrante D |
-| `reconciler.py` | Compara índices local vs. remoto, decide quem está desatualizado (LWW) | Integrante D |
+| `file_manager.py` | Calcula hash SHA-256, lê arquivos em chunks, escreve arquivos recebidos | PRONTO |
+| `state_db.py` | Persiste e consulta o estado de cada arquivo (nome, hash, timestamp, status) | PRONTO |
+| `reconciler.py` | Compara índices local vs. remoto, decide quem está desatualizado (LWW) | PRONTO |
 | `main.py` | Instancia e conecta TODOS os componentes, gerencia threads e o loop principal | Todos juntos |
-| `cli.py` | Funções `log_info`, `log_error`, `log_warn` com formatação bonita | Qualquer um (rápido) |
+| `cli.py` | Funções `log_info`, `log_error`, `log_warn` com formatação bonita | PRONTO |
 
 ---
 
