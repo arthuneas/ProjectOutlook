@@ -27,18 +27,18 @@ def getTime():
 
 #informa que é uma mensagem de sucesso
 def log_info(msg):
-  print(f"{GREEN} [{get_Time()}] [{NODE_NAME}] [INFO] {msg} {RESET}")
+  print(f"{GREEN} [{getTime()}] [{NODE_NAME}] [INFO] {msg} {RESET}")
 
 
 #informa que é um erro
 def log_error(msg):
-  print(f"{RED} [{get_Time()}] [{NODE_NAME}] [ERROR] {msg} {RESET}")
+  print(f"{RED} [{getTime()}] [{NODE_NAME}] [ERROR] {msg} {RESET}")
 
 
 #informa que é um aviso
 def log_warn(msg):
-  print(f"{YELLOW} [{get_Time()}] [{NODE_NAME}] [WARN] {msg} {RESET}")
+  print(f"{YELLOW} [{getTime()}] [{NODE_NAME}] [WARN] {msg} {RESET}")
 
 #informa que é uma sincronicidade
 def log_sync(msg):
-  print(f"{CYAN} [{get_Time()}] [{NODE_NAME}] [SYNC] {msg} {RESET}")
+  print(f"{CYAN} [{getTime()}] [{NODE_NAME}] [SYNC] {msg} {RESET}")

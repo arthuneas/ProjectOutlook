@@ -26,8 +26,6 @@ TODO (Grupo):
 
 import json
 import struct
-import os
-import cli
 
 # ─── Constantes de Tipos de Mensagens ───────────────────────────────
 MSG_HELLO = "HELLO"
@@ -42,6 +40,7 @@ MSG_DELETE_NOTIFY = "DELETE_NOTIFY"
 MSG_HEARTBEAT = "HEARTBEAT"
 MSG_HEARTBEAT_ACK = "HEARTBEAT_ACK"
 MSG_NODE_LEAVING = "NODE_LEAVING"
+
 MAX_BYTES = 8192 #8kb
 TIME_LIMIT = 10.0 #10 segundo de tempo maximo de espera para envio de pacotes
 
@@ -87,8 +86,8 @@ def recv_exact(sock, n):
     buffer = bytearray() #vetor temporarios e vazio para recebimento dos bytes
     
     while len(buffer) < n: #loop de leitura
-        remaining = n - len(buffer) #
-        data = sock.recv(remaining)
+        remaining = n - len(buffer) #calculo dos bytes totais - a quantidade de elementos no vetor de enfio, o buffer
+        data = sock.recv(remaining) #recebe o que falta
         if not data:
             raise EOFError("Conexão fechada inesperadamente")
         buffer.extend(data)
