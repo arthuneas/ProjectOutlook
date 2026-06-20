@@ -6,7 +6,7 @@
 - **Integrantes:**
   - Arthur Santos Almeida - 242009990
   - Carlos Roberto Da Silva Oliveira - 251004385
-  - Giovanna Sperandio David - 2520386461
+  - Giovanna Sperandio David - 252038646
   - Gabriel Menezes de Araujo - 241020803
 - **Data:** Junho 2026
 
