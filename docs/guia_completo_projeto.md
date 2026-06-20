@@ -68,9 +68,9 @@ O objetivo é construir um sistema P2P onde **múltiplas instâncias** (nós) ro
 │                       NÓ (Peer)                         │
 │                                                         │
 │  ┌──────────────┐    ┌──────────────┐    ┌───────────┐  │
-│  │  Discovery    │    │  TCP Server  │    │  Watcher  │  │
-│  │  (UDP Bcast)  │    │  (Escuta)    │    │ (Watchdog)│  │
-│  │  Thread #1    │    │  Thread #2   │    │ Thread #3 │  │
+│  │  Discovery   │    │  TCP Server  │    │  Watcher  │  │
+│  │  (UDP Bcast) │    │  (Escuta)    │    │ (Watchdog)│  │
+│  │  Thread #1   │    │  Thread #2   │    │ Thread #3 │  │
 │  └──────┬───────┘    └──────┬───────┘    └─────┬─────┘  │
 │         │                   │                  │        │
 │         ▼                   ▼                  ▼        │
@@ -79,15 +79,15 @@ O objetivo é construir um sistema P2P onde **múltiplas instâncias** (nós) ro
 │  │         Gerencia known_nodes, state_db, locks       ││
 │  └──────────────────────┬──────────────────────────────┘│
 │                         │                               │
-│  ┌──────────┐   ┌───────┴──────┐   ┌────────────────┐  │
-│  │ StateDB  │   │ Reconciler   │   │  File Manager  │  │
-│  │ (JSON/   │   │ (LWW /       │   │  (Hash, R/W    │  │
-│  │  SQLite) │   │  Conflitos)  │   │   Chunks)      │  │
-│  └──────────┘   └──────────────┘   └────────────────┘  │
+│  ┌──────────┐   ┌───────┴──────┐   ┌────────────────┐   │
+│  │ StateDB  │   │ Reconciler   │   │  File Manager  │   │
+│  │ (JSON/   │   │ (LWW /       │   │  (Hash, R/W    │   │
+│  │  SQLite) │   │  Conflitos)  │   │   Chunks)      │   │
+│  └──────────┘   └──────────────┘   └────────────────┘   │
 │                                                         │
 │  ┌──────────────┐                                       │
 │  │  TCP Client  │  ← Usado para enviar mensagens        │
-│  │  (Ativo)     │    ativamente para outros nós          │
+│  │  (Ativo)     │    ativamente para outros nós         │
 │  └──────────────┘                                       │
 └─────────────────────────────────────────────────────────┘
 ```
