@@ -62,7 +62,12 @@ class FileManager:
         with open(filepath, 'wb') as arquivo: #abre o arquivo no modo de escrita
             
             for chunk in chunks_list:
-                arquivo.write(chunk) #escreve a chunk da lista no arquivo
+                #converte de JSON p/ byte, se vier em str
+                if isinstance(chunk, str):
+                    chunk_em_byte = base64.b64decode(chunk)
+                    arquivo.write(chunk_em_byte)
+                else:
+                    arquivo.write(chunk) #escreve a chunk da lista no arquivo
                 
                 
     #metodo para acessar o tamanho do arquivo             
