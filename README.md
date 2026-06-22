@@ -2,19 +2,6 @@
 
 Sistema distribuído de sincronização de arquivos P2P para a disciplina de Redes.
 
-## Status atual
-
-- Etapa 1 concluída: pacote, imports, configuração, SQLite, `main` executável e encerramento gracioso.
-- Etapa 2 concluída: protocolo validado, TCP Server concorrente, TCP Client, heartbeat, índices e transferência segura em chunks.
-- 13 testes automatizados aprovados.
-- Descoberta automática e Watchdog ainda pertencem às próximas etapas; portanto, a sincronização automática completa ainda não está ativa.
-
-Para executar os testes:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
 ## Estrutura do Projeto
 
 ```
@@ -44,13 +31,13 @@ src/
 
 2. Execute o nó:
    ```bash
-   python -m src.main
+   python src/main.py
    ```
 
 3. Para simular múltiplos nós na mesma máquina, abra múltiplos terminais com portas diferentes:
    ```bash
-   NODE_NAME=Node1 TCP_PORT=5001 python -m src.main
-   NODE_NAME=Node2 TCP_PORT=5002 python -m src.main
+   NODE_NAME=Node1 TCP_PORT=5001 python src/main.py
+   NODE_NAME=Node2 TCP_PORT=5002 python src/main.py
    ```
 
 ## Como Executar com Docker (Simular Múltiplos Nós)

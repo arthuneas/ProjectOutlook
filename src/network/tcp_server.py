@@ -1,302 +1,255 @@
-"""servidor tcp concorrente do syncp2p."""
+"""
+tcp_server.py — Servidor TCP para receber conexões de outros nós.
 
-import base64
-import os
+Responsabilidades:
+  1. Escutar na porta TCP por conexões de outros nós
+  2. Aceitar conexões e criar thread separada para cada cliente
+  3. Receber mensagens usando framing do protocol.py (recv_message)
+  4. Rotear cada mensagem para o handler correto baseado no 'type'
+  5. Responder adequadamente (ex: enviar arquivo quando receber FILE_REQUEST)
+
+Handlers a implementar:
+  - _handle_index_exchange(msg, sock) → recebe índice remoto, compara, troca arquivos
+  - _handle_file_request(msg, sock) → lê arquivo e envia em chunks
+  - _handle_file_notify(msg, sock) → recebe notificação de alteração
+  - _handle_delete_notify(msg, sock) → recebe notificação de deleção
+  - _handle_heartbeat(msg, sock) → responde com HEARTBEAT_ACK
+
+TODO (Grupo):
+  - Implementar TCPServer que recebe referências para state_db, file_manager, reconciler
+  - Implementar start() — bind, listen, accept loop
+  - Implementar _handle_client(sock, addr) — recv_message + switch no type
+  - Implementar cada handler individualmente
+  - IMPORTANTE: usar protocol.recv_message() para ler (com framing!)
+  - IMPORTANTE: NÃO fechar conexão após 1 mensagem se houver conversa multi-mensagem
+"""
+
 import socket
 import threading
-from pathlib import Path
+from config import TCP_PORT, NODE_ID, SHARED_FOLDER
+import time
+
+from ..ui.cli import log_info, log_error, log_sync, log_warn
 
 from .protocol import (
-    MSG_DELETE_NOTIFY,
-    MSG_ERROR,
-    MSG_FILE_CHUNK,
-    MSG_FILE_NOTIFY,
+    build_message,
+    send_message,
+    recv_message,
+    MSG_INDEX_EXCHANGE,
     MSG_FILE_REQUEST,
-    MSG_FILE_TRANSFER_COMPLETE,
     MSG_FILE_TRANSFER_START,
+    MSG_FILE_CHUNK,
+    MSG_FILE_TRANSFER_COMPLETE,
+    MSG_FILE_NOTIFY,
+    MSG_DELETE_NOTIFY,
     MSG_HEARTBEAT,
     MSG_HEARTBEAT_ACK,
-    MSG_INDEX_EXCHANGE,
     MSG_NODE_LEAVING,
-    ProtocolError,
-    build_message,
-    recv_message,
-    send_message,
 )
-from ..config import CHUNK_SIZE, NODE_ID, SHARED_FOLDER, SOCKET_TIMEOUT, TCP_PORT
+
 from ..sync.file_manager import FileManager
 from ..sync.reconciler import Reconciler
-from ..ui.cli import log_error, log_info, log_warn
+from ..sync.state_db import StateDB
+import os
 
 
 class TCPServer:
-    def __init__(
-        self,
-        state_db,
-        file_manager=FileManager,
-        reconciler=Reconciler,
-        discovery=None,
-        on_index=None,
-        on_notify=None,
-        host="0.0.0.0",
-        port=TCP_PORT,
-        shared_folder=SHARED_FOLDER,
-        chunk_size=CHUNK_SIZE,
-        socket_timeout=SOCKET_TIMEOUT,
-    ):
-        # dependências são recebidas de fora para manter rede e sincronização desacopladas
+    # dessa vez, diferente do tcp_client, é necessário um construtor pois o servidor é stateful! É necessário guardar informações
+    def __init__(self, state_db, file_manager, reconciler, discovery):  # construtor
         self.state_db = state_db
         self.file_manager = file_manager
         self.reconciler = reconciler
         self.discovery = discovery
-        self.on_index = on_index
-        self.on_notify = on_notify
-        self.host = host
-        self.port = int(port)
-        self.shared_folder = Path(shared_folder).resolve()
-        self.chunk_size = int(chunk_size)
-        self.socket_timeout = float(socket_timeout)
-
-        # estas estruturas permitem controlar listener, clientes e workers no encerramento
-        self.stop_event = threading.Event()
-        self.sock = None
-        self.accept_thread = None
-        self.clients = set()
-        self.workers = set()
-        self.lock = threading.Lock()
-
-    @property
-    def bound_port(self):
-        return self.sock.getsockname()[1] if self.sock else self.port
+        self.porta = TCP_PORT
 
     def start(self):
-        # o accept roda em background para que o main possa iniciar os próximos componentes
-        if self.accept_thread and self.accept_thread.is_alive():
-            return self.bound_port
-        self.shared_folder.mkdir(parents=True, exist_ok=True)
-        self.stop_event.clear()
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            server.bind((self.host, self.port))
-            server.listen(20)
-            server.settimeout(0.5)
-        except Exception:
-            server.close()
-            raise
-        self.sock = server
-        self.accept_thread = threading.Thread(target=self._accept_loop, name="tcp-server", daemon=True)
-        self.accept_thread.start()
-        log_info(f"servidor tcp escutando na porta {self.bound_port}")
-        return self.bound_port
+            # criando o socketTCP do servidor
+            server_socketTCP = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server_socketTCP.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # ^ essa linha serve para evitar o erro "Address already in use", principalmente quando o socket é fechado. Demora um pouco
+            # até que o TCP libere a porta pois o servidor está em TIME WAIT esperando uma possível nova requisição do cliente, por segu-
+            # rança, por causa do protocolo FIN. Essa config da linha ignora o TIME_WAIT, permitindo que o cliente conecte de novo imediatamente
 
-    def _accept_loop(self):
-        server = self.sock
-        while not self.stop_event.is_set():
-            try:
-                client, address = server.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            # cada conexão recebe um worker para que clientes sejam atendidos em paralelo
-            client.settimeout(self.socket_timeout)
-            worker = threading.Thread(
-                target=self._client_worker,
-                args=(client, address),
-                name=f"tcp-client-{address[0]}:{address[1]}",
-                daemon=True,
+            server_socketTCP.bind(
+                ("0.0.0.0", self.porta)
+            )  # escutando de 0.0.0.0 = escutar de qualquer fonte
+            server_socketTCP.listen(
+                5
+            )  # fila de espera para receber o accept vai só até 5 "lugares"
+
+            # feedback cli
+            log_info("Servidor TCP ligado e aguardando conexões...")
+            
+            while True:
+              sock_cliente, endereco_cliente = server_socketTCP.accept()
+              thread_nova = threading.Thread(
+                  target=self._handle_client,
+                  args=(
+                      sock_cliente,
+                      endereco_cliente,
+                  ),
+                  daemon=True,
+              )
+              thread_nova.start()
+
+        except Exception as e:
+            log_error(f"Falha ao iniciar o servidor TCP na porta {self.porta}: {e}")
+            # aceitando clientes
+
+    # ─────────────────────────────── Implementando o _handle_client ───────────────────────────────
+    def _handle_client(self, sock_cliente, endereco_cliente):
+        sock_cliente.settimeout(15)
+
+        try:
+            # loop pra virar keepalive ("NÃO fechar conexão após 1 mensagem se houver conversa multi-mensagem")
+            while True:
+                try:
+                    # lendo msg
+                    msg = recv_message(sock_cliente)
+
+                except EOFError:
+                    log_info(
+                        f"Conexão finalizada corretamente pelo nó remoto ({endereco_cliente[0]})."
+                    )
+                    break  # cliente encerrou conexão
+
+                if msg["type"] == MSG_INDEX_EXCHANGE:
+                    self._handle_index_exchange(msg, sock_cliente)
+
+                elif msg["type"] == MSG_FILE_REQUEST:
+                    self._handle_file_request(msg, sock_cliente)
+
+                elif msg["type"] == MSG_FILE_NOTIFY:
+                    self._handle_file_notify(msg, sock_cliente)
+
+                elif msg["type"] == MSG_DELETE_NOTIFY:
+                    self._handle_delete_notify(msg, sock_cliente)
+
+                elif (
+                    msg["type"] == MSG_HEARTBEAT
+                ):  # cliente perguntando se tô online. Se eu recebi, estou, ent envio resposta imediata
+                    msg_ack = build_message(MSG_HEARTBEAT_ACK)
+                    send_message(sock_cliente, msg_ack)  # mando pro cliente o ack
+
+        except socket.timeout:
+            log_warn(
+                f"Timeout de 15s atingido para o cliente ({endereco_cliente[0]}). Fechando conexão..."
             )
-            with self.lock:
-                self.clients.add(client)
-                self.workers.add(worker)
-            worker.start()
 
-    def _client_worker(self, sock, address):
-        # o finally remove referências mesmo quando cliente ou protocolo falham
+        except Exception as e:
+            log_warn(
+                "Conexão interrompida com o cliente: "
+                + endereco_cliente[0]
+                + f". Aviso: {e}"
+            )
+
+        finally:  # sempre é executado
+            sock_cliente.close()  # libera recurso do SO
+
+    # ─────────────────────────────── Implementando o _handle_index_exchange ───────────────────────────────
+    def _handle_index_exchange(self, msg, sock_cliente):
         try:
-            self._handle_client(sock, address)
-        finally:
-            with self.lock:
-                self.clients.discard(sock)
-                self.workers.discard(threading.current_thread())
-            sock.close()
+            indice_remoto = msg["files"]
+            node_id_remoto = msg["node_id"]
 
-    def _handle_client(self, sock, address):
-        # a conexão permanece aberta porque uma transferência usa várias mensagens
-        while not self.stop_event.is_set():
-            try:
-                message = recv_message(sock)
-            except (EOFError, socket.timeout, OSError):
-                return
-            except ProtocolError as exc:
-                # entrada inválida encerra somente este cliente, não o listener principal
-                self._send_error(sock, "INVALID_MESSAGE", str(exc))
-                return
-            try:
-                if not self._route_message(message, sock, address[0]):
-                    return
-            except (KeyError, TypeError, ValueError, ProtocolError) as exc:
-                self._send_error(sock, "INVALID_FIELDS", str(exc))
-                return
-            except Exception as exc:
-                log_error(f"erro ao atender {address[0]}: {exc}")
-                self._send_error(sock, "INTERNAL_ERROR", "falha interna")
-                return
+            # pegando informacoes do bd
+            indice_local = self.state_db.get_full_index()
 
-    def _route_message(self, message, sock, remote_ip):
-        # o roteador valida o tipo e encaminha para o handler correspondente
-        msg_type = message["type"]
-        if msg_type == MSG_FILE_REQUEST:
-            self._send_file(sock, self._required_string(message, "filename"))
-            return True
-        if msg_type == MSG_INDEX_EXCHANGE:
-            self._handle_index_exchange(message, sock, remote_ip)
-            return True
-        if msg_type == MSG_FILE_NOTIFY:
-            self._required_string(message, "filename")
-            if self.on_notify:
-                self.on_notify(message, remote_ip)
-            return True
-        if msg_type == MSG_DELETE_NOTIFY:
-            self._handle_delete_notify(message, remote_ip)
-            return True
-        if msg_type == MSG_HEARTBEAT:
-            send_message(sock, build_message(MSG_HEARTBEAT_ACK, node_id=NODE_ID))
-            return True
-        if msg_type == MSG_NODE_LEAVING:
-            node_id = self._required_string(message, "node_id")
-            if self.discovery:
-                self.discovery.remove_node(node_id)
-            return True
-        self._send_error(sock, "UNSUPPORTED_MESSAGE", f"mensagem não aceita: {msg_type}")
-        return False
+            # vamos comparar o que o reconciliador Last Write Wins faz com os index (ou seja, quando alguém entrar na rede, eu vou comparar
+            # a minha pasta com a dele. A depender do que for >>mais recente<< :
+            # 1. se nem existir no meu ou for uma versão desatualizada, eu preciso baixar
+            # 2. se existir no dele, mas for uma versão antiga, ele precisa atualizar (preciso enviar a versão atualizada)
+            # 3. se tiver sido apagado e tiver timestamp mais recente, precisa apagar)
+            download_list, upload_list, delete_list = self.reconciler.compare_indices(
+                indice_local, indice_remoto, NODE_ID, node_id_remoto
+            )
 
-    def _handle_index_exchange(self, message, sock, remote_ip):
-        # o reconciliador compara índices e devolve as ações necessárias no nó local
-        remote_id = self._required_string(message, "node_id")
-        remote_index = message.get("files")
-        if not isinstance(remote_index, dict):
-            raise ValueError("index_exchange exige o campo files")
-        local_index = self.state_db.get_full_index()
-        downloads, uploads, deletions = self.reconciler.compare_indices(
-            local_index, remote_index, NODE_ID, remote_id
-        )
-        if self.on_index:
-            self.on_index(message, remote_ip, (downloads, uploads, deletions))
-        send_message(
-            sock,
-            build_message(
-                MSG_INDEX_EXCHANGE,
-                node_id=NODE_ID,
-                tcp_port=self.bound_port,
-                files=local_index,
-                actions={"download": downloads, "upload": uploads, "delete": deletions},
-                reply=True,
-            ),
-        )
+        except Exception as e:
+            log_error(f"Erro ao processar reconciliação dos índices: {e}")
 
-    def _handle_delete_notify(self, message, remote_ip):
-        # uma exclusão mais recente remove o arquivo e mantém um tombstone no banco
-        filename = self._required_string(message, "filename")
-        timestamp = message.get("timestamp")
-        if not isinstance(timestamp, (int, float)):
-            raise ValueError("delete_notify exige timestamp")
-        local_state = self.state_db.get_file_state(filename)
-        if local_state is None or timestamp >= local_state["timestamp"]:
-            path = self._resolve_shared_file(filename)
-            if path and path.is_file():
-                self.file_manager.delete_file(path)
-            self.state_db.mark_deleted(filename, timestamp)
-        if self.on_notify:
-            self.on_notify(message, remote_ip)
+        # TODO: gerenciar essas listas (download_list, upload_list, delete_list) no main
 
-    def _send_file(self, sock, filename):
-        path = self._resolve_shared_file(filename)
-        if path is None or not path.is_file():
-            self._send_error(sock, "FILE_NOT_FOUND", "arquivo não encontrado")
+    # ─────────────────────────────── Implementando o _handle_file_request ───────────────────────────────
+    def _handle_file_request(self, msg, sock_cliente):
+        nome_arquivo = msg["filename"]
+        # pegando o caminho:
+        caminho_completo = os.path.join(SHARED_FOLDER, nome_arquivo)
+
+        if not os.path.exists(caminho_completo):
+            log_warn(
+                f"Nó remoto solicitou arquivo que não existe localmente: {nome_arquivo}"
+            )
             return
-        size = self.file_manager.get_file_size(path)
-        file_hash = self.file_manager.get_file_hash(path)
-        # arquivo vazio → 1 chunk vazio; arquivo não-vazio → ceil(size / chunk_size) chunks
-        total_chunks = max(1, (size + self.chunk_size - 1) // self.chunk_size)
-        send_message(
-            sock,
-            build_message(
+
+        try:
+            # guardando informações do arquivo
+            tamanho = self.file_manager.get_file_size(caminho_completo)
+            hash_arquivo = self.file_manager.get_file_hash(caminho_completo)
+
+            msg_start = build_message(
                 MSG_FILE_TRANSFER_START,
-                filename=filename,
-                size=size,
-                hash=file_hash,
-                total_chunks=total_chunks,
-            ),
-        )
-        if size == 0:
-            send_message(
-                sock,
-                build_message(MSG_FILE_CHUNK, filename=filename, chunk_index=0, data="", is_last=True),
+                filename=nome_arquivo,
+                size=tamanho,
+                hash=hash_arquivo,
             )
-        else:
-            for index, chunk in enumerate(self.file_manager.read_file_chunks(path, self.chunk_size)):
-                send_message(
-                    sock,
-                    build_message(
-                        MSG_FILE_CHUNK,
-                        filename=filename,
-                        chunk_index=index,
-                        data=base64.b64encode(chunk).decode("ascii"),
-                        is_last=index == total_chunks - 1,
-                    ),
+            send_message(sock_cliente, msg_start)
+
+            # agora vou enviar em chunks o arquivo atraves do yield do FileManager
+            for bloco_base64 in self.file_manager.read_file_chunks(caminho_completo):
+                msg_chunk = build_message(
+                    MSG_FILE_CHUNK,
+                    filename=nome_arquivo,
+                    data=bloco_base64,
+                    is_last=False,
                 )
-        confirmation = recv_message(sock)
-        if confirmation.get("type") != MSG_FILE_TRANSFER_COMPLETE:
-            raise ProtocolError("confirmação de transferência inválida")
-        if confirmation.get("hash") != file_hash:
-            raise ProtocolError("cliente confirmou outro hash")
+                send_message(sock_cliente, msg_chunk)
 
-    def _resolve_shared_file(self, filename):
-        # basename e relative_to impedem caminhos que escapem da pasta compartilhada
-        if filename != os.path.basename(filename) or filename in {".", ".."}:
-            return None
-        path = (self.shared_folder / filename).resolve()
-        try:
-            path.relative_to(self.shared_folder)
-        except ValueError:
-            return None
-        return path
+            # informando o chunk final
+            msg_final = build_message(
+                MSG_FILE_CHUNK, filename=nome_arquivo, data="", is_last=True
+            )
+            send_message(sock_cliente, msg_final)
+            log_info(f"Arquivo {nome_arquivo} enviado com sucesso.")
 
-    @staticmethod
-    def _required_string(message, field):
-        value = message.get(field)
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"campo obrigatório inválido: {field}")
-        return value
+        except Exception as e:
+            log_error(
+                f"Falha crítica ao transmitir chunks do arquivo {nome_arquivo}: {e}"
+            )
 
-    @staticmethod
-    def _send_error(sock, code, detail):
-        try:
-            send_message(sock, build_message(MSG_ERROR, code=code, error=detail))
-        except OSError:
-            pass
+    # ─────────────────────────────── Implementando o _handle_file_notify ───────────────────────────────
+    def _handle_file_notify(self, msg, sock_cliente):
+        nome_arquivo = msg["filename"]
+        timestamp_remoto = msg["timestamp"]
 
-    def stop(self):
-        # fechar listener e clientes acorda threads bloqueadas em accept ou recv
-        self.stop_event.set()
-        if self.sock:
-            try:
-                self.sock.close()
-            except OSError:
-                pass
-            self.sock = None
-        with self.lock:
-            clients = list(self.clients)
-            workers = list(self.workers)
-        for client in clients:
-            try:
-                client.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            client.close()
-        if self.accept_thread:
-            self.accept_thread.join(timeout=2)
-        for worker in workers:
-            worker.join(timeout=2)
+        # pegando as info no banco de dados
+        estado_local = self.state_db.get_file_state(nome_arquivo)
+
+        # caso o servidor não conheça o arquivo ou houve uma alteração mais recente do que a que possuo
+        if estado_local is None or timestamp_remoto > estado_local["timestamp"]:
+            # irei avisar que ainda preciso me atualizar
+            log_sync(
+                "Notificação: Mudança detectada em nó remoto para o arquivo: "
+                + nome_arquivo
+            )
+
+    # ─────────────────────────────── Implementando o _handle_delete_notify ───────────────────────────────
+    def _handle_delete_notify(self, msg, sock_cliente):
+        nome_arquivo = msg["filename"]
+        timestamp_delecao = msg["timestamp"]
+
+        estado_local = self.state_db.get_file_state(nome_arquivo)
+
+        # se o arquivo existir/ativo e a delecao não é mais antiga que o arquivo
+        if estado_local and estado_local["status"] == "ACTIVE":
+            if timestamp_delecao > estado_local["timestamp"]:
+                # marcando como deletado
+                self.state_db.mark_deleted(nome_arquivo, timestamp_delecao)
+
+                # deletando o arquivo em si
+                caminho_completo = os.path.join(SHARED_FOLDER, nome_arquivo)
+                self.file_manager.delete_file(caminho_completo)
+
+                log_sync(
+                    "Arquivo excluído com sucesso para sincronizar as pastas remotas"
+                )
