@@ -22,8 +22,6 @@ class Reconciler:
     @staticmethod
     def compare_indices(local_index, remote_index, local_node_id, remote_node_id):
         """
-        Retorna (files_to_download, files_to_upload, files_to_delete).
-
         download  — arquivos para baixar do remoto
         upload    — arquivos para enviar ao remoto
         delete    — arquivos para deletar localmente
