@@ -1,17 +1,8 @@
-"""
-protocol.py — Definição do protocolo de comunicação SyncP2P.
-
-Este módulo centraliza:
-  1. Constantes de tipos de mensagens
-  2. Funções para construir mensagens (build_message)
-  3. Funções para serializar/desserializar com framing TCP (send_message, recv_message)
-
-"""
+"""framing e validação das mensagens do syncp2p."""
 
 import json
 import struct
 
-# ─── Constantes de Tipos de Mensagens ───────────────────────────────
 MSG_HELLO = "HELLO"
 MSG_HELLO_ACK = "HELLO_ACK"
 MSG_INDEX_EXCHANGE = "INDEX_EXCHANGE"
@@ -24,51 +15,90 @@ MSG_DELETE_NOTIFY = "DELETE_NOTIFY"
 MSG_HEARTBEAT = "HEARTBEAT"
 MSG_HEARTBEAT_ACK = "HEARTBEAT_ACK"
 MSG_NODE_LEAVING = "NODE_LEAVING"
+MSG_ERROR = "ERROR"
 
-MAX_BYTES = 8192 #8kb
-TIME_LIMIT = 10.0 #10 segundo de tempo maximo de espera para envio de pacotes
+MESSAGE_TYPES = frozenset(
+    {
+        MSG_HELLO,
+        MSG_HELLO_ACK,
+        MSG_INDEX_EXCHANGE,
+        MSG_FILE_REQUEST,
+        MSG_FILE_TRANSFER_START,
+        MSG_FILE_CHUNK,
+        MSG_FILE_TRANSFER_COMPLETE,
+        MSG_FILE_NOTIFY,
+        MSG_DELETE_NOTIFY,
+        MSG_HEARTBEAT,
+        MSG_HEARTBEAT_ACK,
+        MSG_NODE_LEAVING,
+        MSG_ERROR,
+    }
+)
 
-# TODO: Implementar as funções abaixo
-
-def build_message(msg_type, **kwargs):
-    """Constrói um dicionário de mensagem com o tipo e campos extras."""
-    msg = {"type": msg_type}
-    msg.update(kwargs)  # adiciona outros campos passados na função
-    return msg
+MAX_MESSAGE_SIZE = 8 * 1024 * 1024
 
 
-def send_message(sock, msg_dict):
-    """Serializa msg_dict para JSON, adiciona header de 4 bytes com tamanho, envia pelo socket."""
-    txt = json.dumps(msg_dict).encode("utf-8") # transforma o dict em bytes JSON para enviar
-    tam = len(txt)                              # tamanho do payload em bytes
-    header = struct.pack(">I", tam)             # empacota tamanho em 4 bytes big-endian
-    sock.sendall(header + txt)                  # envia header + payload de uma vez
+class ProtocolError(ValueError):
+    """erro de formato ou framing da mensagem."""
+
+
+def build_message(msg_type, **fields):
+    # centralizar a criação impede que tipos desconhecidos circulem pela aplicação
+    if msg_type not in MESSAGE_TYPES:
+        raise ProtocolError(f"tipo de mensagem desconhecido: {msg_type!r}")
+    message = {"type": msg_type}
+    message.update(fields)
+    return message
+
+
+def validate_message(message):
+    # toda mensagem precisa ser um objeto json com um tipo reconhecido
+    if not isinstance(message, dict):
+        raise ProtocolError("a mensagem precisa ser um objeto json")
+    msg_type = message.get("type")
+    if not isinstance(msg_type, str) or msg_type not in MESSAGE_TYPES:
+        raise ProtocolError(f"tipo de mensagem inválido: {msg_type!r}")
+    return message
+
+
+def encode_message(message):
+    # o json vira bytes antes de receber o cabeçalho de quatro bytes
+    validate_message(message)
+    try:
+        payload = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError(f"mensagem não serializável: {exc}") from exc
+    # o limite evita alocações excessivas causadas por mensagens inválidas
+    if not payload or len(payload) > MAX_MESSAGE_SIZE:
+        raise ProtocolError(f"payload fora do limite: {len(payload)} bytes")
+    return struct.pack(">I", len(payload)) + payload
+
+
+def send_message(sock, message):
+    # sendall garante que cabeçalho e payload sejam entregues ao sistema operacional
+    sock.sendall(encode_message(message))
+
+
+def recv_exact(sock, size):
+    # tcp pode devolver apenas uma parte dos bytes solicitados em cada leitura
+    data = bytearray()
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            raise EOFError("conexão fechada antes do fim da mensagem")
+        data.extend(chunk)
+    return bytes(data)
 
 
 def recv_message(sock):
-    """Lê header de 4 bytes, depois lê N bytes do payload, desserializa JSON."""
+    # primeiro é lido o tamanho e depois exatamente a quantidade indicada
     header = recv_exact(sock, 4)
-
-    if len(header) != 4:
-        raise EOFError("Header incompleto recebido")
-
-    tam = struct.unpack(">I", header)[0]  # desempacota tamanho do payload
-
-    payload = recv_exact(sock, tam)       # lê exatamente tam bytes
-    return json.loads(payload.decode("utf-8"))  # desserializa JSON e retorna dict
-
-
-def recv_exact(sock, n):
-    """Lê exatamente N bytes do socket (loop até completar)."""
-    sock.settimeout(TIME_LIMIT)  # tempo máximo de espera por dados no buffer
-
-    buffer = bytearray() #vetor temporarios e vazio para recebimento dos bytes
-    
-    while len(buffer) < n: #loop de leitura
-        remaining = n - len(buffer) #
-        data = sock.recv(remaining)
-        if not data:
-            raise EOFError("Conexão fechada inesperadamente")
-        buffer.extend(data)
-
-    return bytes(buffer)  # retorna os N bytes completos
+    payload_size = struct.unpack(">I", header)[0]
+    if payload_size == 0 or payload_size > MAX_MESSAGE_SIZE:
+        raise ProtocolError(f"tamanho de payload inválido: {payload_size}")
+    payload = recv_exact(sock, payload_size)
+    try:
+        message = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProtocolError(f"json inválido: {exc}") from exc
+    return validate_message(message)

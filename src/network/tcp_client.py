@@ -1,168 +1,179 @@
-"""
-tcp_client.py — Cliente TCP para enviar mensagens ativamente para outros nós.
+"""cliente tcp do syncp2p."""
 
-Responsabilidades:
-  1. Conectar a um nó remoto via TCP
-  2. Enviar mensagens usando framing do protocol.py (send_message)
-  3. Opcionalmente aguardar resposta (send_and_receive)
-  4. Solicitar e receber arquivos (request_file)
-
-TODO (Grupo):
-  - Implementar send_message(ip, port, msg_dict) — conecta, envia com framing, fecha
-  - Implementar send_and_receive(ip, port, msg_dict) — conecta, envia, espera resposta
-  - Implementar request_file(ip, port, filename, save_path) — envia FILE_REQUEST, recebe chunks
-  - Implementar send_index(ip, port, local_index) — envia INDEX_EXCHANGE
-  - IMPORTANTE: usar socket.settimeout(10) para evitar bloqueios infinitos
-  - IMPORTANTE: implementar retry com backoff exponencial (2s, 4s, 8s, max 3 tentativas)
-"""
-
+import base64
+import binascii
+import hashlib
+import os
 import socket
-import json
-import time  # importante pra contar o período do backoff
+import tempfile
+import time
+from pathlib import Path
 
 from .protocol import (
-    build_message,
-    send_message,
-    recv_message,
-    MSG_INDEX_EXCHANGE,
-    MSG_FILE_REQUEST,
-    MSG_FILE_TRANSFER_START,
+    MSG_ERROR,
     MSG_FILE_CHUNK,
+    MSG_FILE_REQUEST,
     MSG_FILE_TRANSFER_COMPLETE,
+    MSG_FILE_TRANSFER_START,
+    MSG_INDEX_EXCHANGE,
+    ProtocolError,
+    build_message,
+    recv_message,
+    send_message as protocol_send,
 )
-
-from ..sync.file_manager import FileManager
-
-from ..ui.cli import log_info, log_error, log_sync, log_warn
+from ..config import NODE_ID, SOCKET_TIMEOUT, TCP_PORT
+from ..ui.cli import log_error, log_info, log_sync, log_warn
 
 
 class TCPClient:
-    # nota para si: aqui não tem __init__ porque o TCPClient é stateless! não precisa guardar nada, logo não precisa de construtor.
-    # primeiro implementando esse backoff exponencial, para evitar inundar a rede com requisições demais sendo que as últimas acabaram de ser negadas (ou seja, esperar um tiquinho)
-
     @staticmethod
-    def conexao_backoff(ip, port):
-        tentativas = 0
-        tempo_espera = 2  # segundos. tempo de espera inicial (olhe linha 55)
-
-        while tentativas < 3:  # implementando máximo de 3 tentativas
+    def connect(ip, port, retries=3, timeout=SOCKET_TIMEOUT, initial_backoff=0.5, quiet=False):
+        # cada falha fecha o socket e aumenta o intervalo antes da próxima tentativa
+        if retries < 1:
+            raise ValueError("retries precisa ser pelo menos 1")
+        delay = initial_backoff
+        last_error = None
+        for attempt in range(1, retries + 1):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
             try:
-                # criando o socket tcp
-                socketTCP = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                socketTCP.settimeout(10)
-                socketTCP.connect((ip, port))
-                return socketTCP  # conectado!
-
-            except Exception as e:
-                tentativas += 1
-                log_warn(
-                    f"Tentativa {tentativas}/3 falhou ao conectar em {ip}:{port}. Erro: {e}"
-                )
-                if tentativas == 3:
-                    log_error(f"Tentativas esgotadas para o destino {ip}:{port}.")
-                    raise RuntimeError(
-                        "Conexão mal-sucedida: Servidor inacessível após 3 tentativas"
-                    )
-                time.sleep(tempo_espera)
-                tempo_espera = (
-                    tempo_espera * 2
-                )  # na segunda será 4s, na terceira será 8s
+                sock.connect((ip, int(port)))
+                return sock
+            except OSError as exc:
+                last_error = exc
+                sock.close()
+                if attempt < retries:
+                    if not quiet:
+                        log_warn(f"conexão {attempt}/{retries} falhou; nova tentativa em {delay:.1f}s")
+                    time.sleep(delay)
+                    delay *= 2
+        raise ConnectionError(f"servidor {ip}:{port} inacessível") from last_error
 
     @staticmethod
-    def send_message(ip, port, msg_dict):
+    def send_message(ip, port, message, quiet=False):
+        # usado para operações que não precisam esperar uma resposta
         try:
-            socketTCP = TCPClient.conexao_backoff(ip, port)
-            send_message(socketTCP, msg_dict)  # botando framing nesse troço
-            socketTCP.close()
-            log_info(
-                f"Mensagem de tipo '{msg_dict['type']}' enviada com sucesso para {ip}:{port}"
-            )
-
-        except Exception as e:
-            log_error(
-                f"Erro: não foi possível enviar a mensagem. Erro: {e}"
-            )  # chamando o cli
+            with TCPClient.connect(ip, port, quiet=quiet) as sock:
+                protocol_send(sock, message)
+            if not quiet:
+                log_info(f"mensagem {message['type']} enviada para {ip}:{port}")
+            return True
+        except Exception as exc:
+            if not quiet:
+                log_error(f"falha ao enviar para {ip}:{port}: {exc}")
+            return False
 
     @staticmethod
-    def send_and_receive(ip, port, msg_dict):
+    def send_and_receive(ip, port, message, quiet=False):
+        # usado por heartbeat e troca de índices, que possuem resposta imediata
         try:
-            socketTCP = TCPClient.conexao_backoff(ip, port)
-            send_message(socketTCP, msg_dict)
-
-            resposta = recv_message(socketTCP)
-            socketTCP.close()
-            return resposta
-
-        except Exception as e:
-            log_error(
-                f"Falha da transação 'send_and_receive' com o nó {ip}:{port}. Erro: {e}"
-            )
+            with TCPClient.connect(ip, port, quiet=quiet) as sock:
+                protocol_send(sock, message)
+                return recv_message(sock)
+        except Exception as exc:
+            if not quiet:
+                log_error(f"falha na comunicação com {ip}:{port}: {exc}")
             return None
 
     @staticmethod
-    def send_index(ip, port, local_index):
-        msg = build_message(MSG_INDEX_EXCHANGE, files=local_index)
-        TCPClient.send_message(ip, port, msg)
+    def send_index(ip, port, local_index, node_id=NODE_ID, tcp_port=TCP_PORT):
+        # identidade e porta permitem que o receptor reconheça o remetente
+        return TCPClient.send_and_receive(
+            ip,
+            port,
+            build_message(
+                MSG_INDEX_EXCHANGE,
+                node_id=node_id,
+                tcp_port=tcp_port,
+                files=local_index,
+            ),
+            quiet=True,
+        )
 
     @staticmethod
     def request_file(ip, port, filename, save_path):
+        # o arquivo definitivo só é substituído depois das validações de tamanho e hash
+        destination = Path(save_path).resolve()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = None
         try:
-            socketTCP = TCPClient.conexao_backoff(ip, port)
+            with TCPClient.connect(ip, port) as sock:
+                protocol_send(sock, build_message(MSG_FILE_REQUEST, filename=filename))
+                start = recv_message(sock)
+                if start.get("type") == MSG_ERROR:
+                    raise FileNotFoundError(start.get("error", filename))
+                if start.get("type") != MSG_FILE_TRANSFER_START:
+                    raise ProtocolError("resposta inicial de arquivo inválida")
+                if start.get("filename") != filename:
+                    raise ProtocolError("servidor respondeu com outro arquivo")
 
-            # ei me da arquivo
-            msg_request = build_message(MSG_FILE_REQUEST, filename=filename)
-            send_message(socketTCP, msg_request)
+                expected_size = TCPClient._integer(start, "size", minimum=0)
+                expected_chunks = TCPClient._integer(start, "total_chunks", minimum=1)
+                expected_hash = start.get("hash")
+                if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+                    raise ProtocolError("hash esperado inválido")
 
-            # aguardando processamento pelo protocolo...
-            msg_start = recv_message(socketTCP)
+                # hash, tamanho e sequência são verificados durante a escrita incremental
+                digest = hashlib.sha256()
+                received_size = 0
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    prefix=f".{destination.name}.",
+                    suffix=".part",
+                    dir=destination.parent,
+                    delete=False,
+                ) as temporary:
+                    temp_path = Path(temporary.name)
+                    for expected_index in range(expected_chunks):
+                        chunk_message = recv_message(sock)
+                        if chunk_message.get("type") != MSG_FILE_CHUNK:
+                            raise ProtocolError("esperado file_chunk")
+                        # índices crescentes detectam chunks perdidos, repetidos ou fora de ordem
+                        if chunk_message.get("chunk_index") != expected_index:
+                            raise ProtocolError("chunk fora de ordem")
+                        data = chunk_message.get("data")
+                        if not isinstance(data, str):
+                            raise ProtocolError("dados do chunk inválidos")
+                        try:
+                            raw = base64.b64decode(data, validate=True)
+                        except (ValueError, binascii.Error) as exc:
+                            raise ProtocolError("base64 inválido") from exc
+                        is_last = chunk_message.get("is_last") is True
+                        if is_last != (expected_index == expected_chunks - 1):
+                            raise ProtocolError("marcador de último chunk inconsistente")
+                        temporary.write(raw)
+                        digest.update(raw)
+                        received_size += len(raw)
 
-            # dependendo da resposta do protocolo (msg_start), eu começo ou não a transferência
-            if msg_start["type"] == MSG_FILE_TRANSFER_START:
-                tamanho_esperado = msg_start["size"]
-                hash_esperado = msg_start["hash"]
+                actual_hash = digest.hexdigest()
+                if received_size != expected_size:
+                    raise ProtocolError(f"tamanho recebido {received_size}, esperado {expected_size}")
+                if actual_hash != expected_hash:
+                    raise ProtocolError("hash recebido não confere")
 
-                # vou criar uma lista de recebimento, porque o arquivo não vai ser enviado inteiro, e sim em pedaços para não
-                # sobrecarregar a ram. Inicialmente, a lista está vazia (ela vai armazenar o que já foi recebido, pra depois)
-                # juntar tudo num arquivo só e guardar no disco rígido
-                lista_de_chunks = []
-                log_sync(
-                    f"Baixando {filename}. Tamanho esperado: {tamanho_esperado} bytes."
+                # os.replace é atômico porque temporário e destino ficam no mesmo diretório
+                os.replace(temp_path, destination)
+                temp_path = None
+                protocol_send(
+                    sock,
+                    build_message(MSG_FILE_TRANSFER_COMPLETE, filename=filename, hash=actual_hash),
                 )
-
-                # agora vamos criar o loop pra receber os chunks!
-                while True:
-                    msg_chunk = recv_message(socketTCP)
-                    if msg_chunk["type"] == MSG_FILE_CHUNK:
-                        if msg_chunk["data"]:
-                            lista_de_chunks.append(msg_chunk["data"])
-
-                        if msg_chunk["is_last"] == True:
-                            break
-
-                # agora que recebi tudo, vou gravar no disco
-                FileManager.save_file_from_chunks(save_path, lista_de_chunks)
-
-                # checando se deu certo mesmo
-                hash_local = FileManager.get_file_hash(save_path)
-                if hash_local == hash_esperado:
-                    # confirmando pro usuario via cli
-                    msg_sucesso = build_message(
-                        MSG_FILE_TRANSFER_COMPLETE, filename=filename
-                    )
-                    send_message(socketTCP, msg_sucesso)
-                    log_sync(f"Download concluído com sucesso: {filename}")
-                else:
-                    log_error("Arquivo corrompido na transmissão (Hash Mismatch)")
-
-            else:
-                log_error(
-                    f"Servidor respondeu com tipo inesperado '{msg_start['type']}' para requisição de arquivo."
-                )
-
-        except Exception as e:
-            log_error(
-                f"Falha no download do arquivo {filename} de {ip}:{port}. Erro: {e}"
-            )
-
+            log_sync(f"download concluído: {filename}")
+            return True
+        except Exception as exc:
+            log_error(f"falha no download de {filename}: {exc}")
+            return False
         finally:
-            socketTCP.close()
+            # uma falha remove somente o temporário e preserva o arquivo anterior
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _integer(message, field, minimum):
+        value = message.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+            raise ProtocolError(f"campo inteiro inválido: {field}")
+        return value

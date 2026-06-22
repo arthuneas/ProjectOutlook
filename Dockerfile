@@ -2,15 +2,15 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Instala dependências
+# instala as dependências antes do código para aproveitar o cache da imagem
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia código-fonte
+# copia o código-fonte que será executado no container
 COPY src/ ./src/
 
-# Cria pasta compartilhada
+# cria o ponto usado pelo volume compartilhado
 RUN mkdir -p /app/shared_folder
 
-# Flag -u desabilita buffering do stdout (logs em tempo real)
-CMD ["python", "-u", "src/main.py"]
+# a opção -u mostra os logs imediatamente e -m executa o pacote corretamente
+CMD ["python", "-u", "-m", "src.main"]

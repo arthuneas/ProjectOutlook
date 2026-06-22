@@ -1,113 +1,65 @@
-"""
-file_manager.py — Gerenciamento de arquivos: hash, leitura/escrita em chunks.
-
-Responsabilidades:
-  1. Calcular hash SHA-256 de arquivos (lendo em chunks para não explodir RAM)
-  2. Ler arquivos grandes em pedaços (generator)
-  3. Escrever arquivos a partir de chunks recebidos
-  4. Escanear diretório completo e retornar índice de arquivos
-  5. Deletar arquivos do disco
-
-"""
+"""gerenciamento de arquivos: hash, leitura/escrita em chunks e varredura."""
 
 import hashlib
 import os
 import base64
+from pathlib import Path
+
 from ..config import CHUNK_SIZE, SHARED_FOLDER
+
 
 class FileManager:
 
-    #método para identificar a modificação do arquivo, gera um id (sha-256) do conteúdo.
-    
     @staticmethod
     def get_file_hash(filepath):
-      
-        if not os.path.exists(filepath): #confere a existência do arquivo
+        if not os.path.exists(filepath):
             return None
-          
-        idhash = hashlib.sha256() #identificador 
-        
-        with open(filepath, 'rb') as arquivo: #abertura de arquivo binário no modo de leitura
-            
-            while True: 
-                conteudoBloco = arquivo.read(CHUNK_SIZE) #lê os blocos de tamanho de CHUNK_SIZE 
-                
-                if not conteudoBloco: #se bloco for vazio quebra o loop
+        digest = hashlib.sha256()
+        with open(filepath, "rb") as f:
+            while True:
+                block = f.read(CHUNK_SIZE)
+                if not block:
                     break
-                  
-                idhash.update(conteudoBloco) #adiciona o conteudo da chunk no idhash
-                
-            return idhash.hexdigest() #retorna a string/ID do arquivo
-          
-          
-    #lê o chunk de dado e retorna o pedaço. Faz que a entrega não sobrecarrege a RAM. Variação na CHUNK_SIZE faz com que a leitura seja dinãmica
+                digest.update(block)
+        return digest.hexdigest()
+
     @staticmethod
-    def read_file_chunks(filepath, chunk_size = CHUNK_SIZE):
-        
-        with open(filepath, 'rb') as arquivo: #abertura no modo de leitura
-          
-          while True: 
-              conteudoBloco = arquivo.read(chunk_size) 
-        
-              if not conteudoBloco: #se bloco for vazio quebra o loop
-                break
-              
-              yield conteudoBloco #retorna o pacote e esse retorno permite entrega parcial e continua dos dados de um conteúo completo
-              
-            
-    #salva o pedaço de dado no arquivo
+    def read_file_chunks(filepath, chunk_size=CHUNK_SIZE):
+        with open(filepath, "rb") as f:
+            while True:
+                block = f.read(chunk_size)
+                if not block:
+                    break
+                yield block
+
     @staticmethod
-    def save_file_from_chunks(filepath, chunks_list):    
-        
-        with open(filepath, 'wb') as arquivo: #abre o arquivo no modo de escrita
-            
+    def save_file_from_chunks(filepath, chunks_list):
+        with open(filepath, "wb") as f:
             for chunk in chunks_list:
-                #converte de JSON p/ byte, se vier em str
                 if isinstance(chunk, str):
-                    chunk_em_byte = base64.b64decode(chunk)
-                    arquivo.write(chunk_em_byte)
+                    f.write(base64.b64decode(chunk))
                 else:
-                    arquivo.write(chunk) #escreve a chunk da lista no arquivo
-                
-                
-    #metodo para acessar o tamanho do arquivo             
+                    f.write(chunk)
+
     @staticmethod
-    def get_file_size(filepath):  
-      
-        if not os.path.exists(filepath): #verifica existencia de arquivo
+    def get_file_size(filepath):
+        if not os.path.exists(filepath):
             return 0
-          
-        else:   
-            return os.path.getsize(filepath) #retorna o tamanho em bytes
-          
-         
-    #metodo para apagar arquivos
+        return os.path.getsize(filepath)
+
     @staticmethod
-    def delete_file(filepath):  
-      
+    def delete_file(filepath):
         if os.path.exists(filepath):
-            os.remove(filepath)        
-            
-            
-    #mapeia os arquivos da pasta e constroi dicionário de dados sobre dados (metadados)        
-    def scan_directory(self, folder_path = SHARED_FOLDER):  
-      
-        index = {} #dicionario vazio para armazenar metadados 
-        
-        for filename in os.listdir(folder_path): #loop para cada arquivo no folder
-            filepath = os.path.join(folder_path, filename) #filepath vai colocar no folder o arquivo atual no diretório do loop
-            
+            os.remove(filepath)
+
+    def scan_directory(self, folder_path=SHARED_FOLDER):
+        index = {}
+        for filename in os.listdir(folder_path):
+            filepath = os.path.join(folder_path, filename)
             if os.path.isfile(filepath):
-                size = FileManager.get_file_size(filepath) #pega o tamanho do arquivo
-                time = os.path.getmtime(filepath) #pega o timestamp do arquivo
-                gethash = FileManager.get_file_hash(filepath) #pega o hash do arquivo 
-                
-                #coloca no dicionario as informações capturadas no index do filename
                 index[filename] = {
-                    "size" : size,
-                    "timestamp" : time, 
-                    "hash" : gethash
+                    "size": FileManager.get_file_size(filepath),
+                    "timestamp": os.path.getmtime(filepath),
+                    "hash": FileManager.get_file_hash(filepath),
                 }
-                
-        return index 
-                
+        return index

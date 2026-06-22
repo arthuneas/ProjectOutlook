@@ -1,42 +1,31 @@
-"""
-config.py — Configurações centralizadas do nó SyncP2P.
-
-Todas as constantes de rede, caminhos e identificação ficam aqui.
-Ao precisar mudar uma porta ou caminho, mude APENAS neste arquivo.
-
-TODO (Grupo):
-  - Ajustar portas se necessário
-  - Adicionar suporte a SEED_NODES para Docker
-  - Configurar CHUNK_SIZE ideal para transferência
-"""
+"""configuração central do nó syncp2p."""
 
 import os
 import uuid
 
-# ─── Identificação do Nó ────────────────────────────────────────────
-NODE_ID = str(uuid.uuid4())
+# a identidade pode ser fornecida pelo ambiente para permanecer estável em testes e containers
+NODE_ID = os.environ.get("NODE_ID", str(uuid.uuid4()))
 NODE_NAME = os.environ.get("NODE_NAME", f"Node-{NODE_ID[:8]}")
 
-# ─── Configurações de Rede ──────────────────────────────────────────
-UDP_PORT = 5000
+# todas as portas podem ser alteradas sem editar o código-fonte
+UDP_PORT = int(os.environ.get("UDP_PORT", 5000))
 TCP_PORT = int(os.environ.get("TCP_PORT", 5001))
-BROADCAST_IP = '255.255.255.255'
-
-# Para Docker: lista de nós sementes (formato: "host1:port1,host2:port2")
+BROADCAST_IP = os.environ.get("BROADCAST_IP", "255.255.255.255")
 SEED_NODES = os.environ.get("SEED_NODES", "")
 
-# ─── Caminhos ───────────────────────────────────────────────────────
+# caminhos configuráveis permitem executar vários nós com pastas e bancos separados
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHARED_FOLDER = os.path.join(BASE_DIR, 'shared_folder')
-DB_PATH = os.path.join(BASE_DIR, 'state.json')
+SHARED_FOLDER = os.path.abspath(os.environ.get("SHARED_FOLDER", os.path.join(BASE_DIR, "shared_folder")))
+DB_PATH = os.path.abspath(os.environ.get("DB_PATH", os.path.join(BASE_DIR, "state.db")))
 
-# ─── Parâmetros de Sincronização ────────────────────────────────────
-CHUNK_SIZE = 4096                # Tamanho de cada pedaço para leitura/envio
-HEARTBEAT_INTERVAL = 15          # Segundos entre heartbeats
-NODE_TIMEOUT = 45                # Segundos sem heartbeat → nó considerado morto
-DISCOVERY_INTERVAL = 30          # Segundos entre broadcasts UDP
-SYNC_INTERVAL = 300              # Segundos entre sincronizações periódicas completas
-DEBOUNCE_DELAY = 0.5             # Segundos de debounce para eventos do watchdog
+# estes valores controlam rede, chunks e os intervalos das próximas etapas
+CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", 4096))
+SOCKET_TIMEOUT = float(os.environ.get("SOCKET_TIMEOUT", 10))
+HEARTBEAT_INTERVAL = float(os.environ.get("HEARTBEAT_INTERVAL", 15))
+NODE_TIMEOUT = float(os.environ.get("NODE_TIMEOUT", 45))
+DISCOVERY_INTERVAL = float(os.environ.get("DISCOVERY_INTERVAL", 30))
+SYNC_INTERVAL = float(os.environ.get("SYNC_INTERVAL", 300))
+DEBOUNCE_DELAY = float(os.environ.get("DEBOUNCE_DELAY", 0.5))
 
-# ─── Garantir que a pasta compartilhada exista ──────────────────────
+# a pasta precisa existir antes do scan inicial e do servidor de arquivos
 os.makedirs(SHARED_FOLDER, exist_ok=True)
