@@ -4,7 +4,9 @@ import signal
 import threading
 import time
 
-from .config import NODE_NAME, SHARED_FOLDER
+from .config import NODE_ID, NODE_NAME, SHARED_FOLDER, TCP_PORT
+from .network.discovery import DiscoveryManager
+from .network.tcp_client import TCPClient
 from .network.tcp_server import TCPServer
 from .sync.file_manager import FileManager
 from .sync.reconciler import Reconciler
@@ -13,9 +15,9 @@ from .ui.cli import log_error, log_info, log_warn
 
 
 class SyncNode:
-    """núcleo executável das etapas 1 e 2.
+    """núcleo executável das etapas 1, 2 e início da etapa 3.
 
-    descoberta e watchdog serão conectados nas próximas etapas sem alterar a api tcp.
+    watchdog e execução automática das ações serão conectados nas próximas etapas.
     """
 
     def __init__(self):
@@ -25,11 +27,14 @@ class SyncNode:
         self.state_db = StateDB()
         self.file_manager = FileManager
         self.reconciler = Reconciler
+        # a descoberta avisa o nó sempre que encontra um novo endereço tcp
+        self.discovery = DiscoveryManager(on_new_node=self.on_new_node)
         # callbacks deixam o servidor independente da futura descoberta e sincronização automática
         self.server = TCPServer(
             self.state_db,
             self.file_manager,
             self.reconciler,
+            discovery=self.discovery,
             on_index=self.on_index,
             on_notify=self.on_notify,
         )
@@ -52,9 +57,37 @@ class SyncNode:
         # o índice é montado antes de aceitar trocas com outros nós
         self.scan_initial()
         port = self.server.start()
+        self.discovery.start()
         log_info(f"{NODE_NAME} iniciado; pasta compartilhada: {SHARED_FOLDER}")
         log_info(f"camada tcp pronta na porta {port}")
-        log_warn("descoberta e watchdog serão conectados nas etapas 3 e 4")
+        log_info("descoberta udp inicial ativa")
+        log_warn("watchdog e expiração automática de peers permanecem pendentes")
+
+    def on_new_node(self, node_id, info):
+        # a primeira ação após descobrir um peer é trocar os índices conhecidos
+        response = TCPClient.send_index(
+            info["ip"],
+            info["tcp_port"],
+            self.state_db.get_full_index(),
+            node_id=NODE_ID,
+            tcp_port=TCP_PORT,
+        )
+        if not response:
+            log_warn(f"peer descoberto, mas troca de índice falhou: {node_id}")
+            return
+        confirmed_id = response.get("node_id")
+        if isinstance(confirmed_id, str) and confirmed_id and confirmed_id != node_id:
+            # uma seed possui identidade temporária até a primeira resposta tcp
+            self.discovery.register_node(confirmed_id, info, notify=False)
+            if node_id.startswith("seed:"):
+                self.discovery.remove_node(node_id)
+        actions = response.get("actions", {})
+        log_info(
+            f"índice trocado com {info['name']}: "
+            f"{len(actions.get('download', []))} downloads, "
+            f"{len(actions.get('upload', []))} uploads, "
+            f"{len(actions.get('delete', []))} exclusões"
+        )
 
     def on_index(self, message, remote_ip, actions):
         # nesta etapa as ações são registradas; a execução entra com descoberta e watcher
@@ -73,6 +106,7 @@ class SyncNode:
             return
         # o listener e os workers são encerrados antes da conexão sqlite
         self.stop_event.set()
+        self.discovery.stop()
         self.server.stop()
         self.state_db.close()
         log_info("nó encerrado")

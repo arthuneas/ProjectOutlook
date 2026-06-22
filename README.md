@@ -6,8 +6,8 @@ Sistema distribuído de sincronização de arquivos P2P para a disciplina de Red
 
 - Etapa 1 concluída: pacote, imports, configuração, SQLite, `main` executável e encerramento gracioso.
 - Etapa 2 concluída: protocolo validado, TCP Server concorrente, TCP Client, heartbeat, índices e transferência segura em chunks.
-- 13 testes automatizados aprovados.
-- Descoberta automática e Watchdog ainda pertencem às próximas etapas; portanto, a sincronização automática completa ainda não está ativa.
+- Etapa 3 iniciada: descoberta UDP básica, `HELLO`, `HELLO_ACK`, catálogo de peers e seed nodes.
+- Watchdog, expiração automática e sincronização completa ainda não estão ativos.
 
 Para executar os testes:
 
