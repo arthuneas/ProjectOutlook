@@ -84,7 +84,66 @@ class SyncNode:
             self.file_manager,
             self.reconciler,
             self.discovery,
+            on_index_reconciled=self._handle_reconciled_lists,
         )
+
+        self.server.watcher = self.watcher
+
+    # ----------------- Implementando o download_list, upload_list, delete_list do Server TCP --------------
+    def _handle_reconciled_lists(
+        self, remote_node_id, remote_ip, download_list, upload_list, delete_list
+    ):
+        """Gerencia as listas calculadas na troca de índices, centralizado na main."""
+
+        # 1. Processar os Downloads usando a proteção do Watchdog
+        for filename in download_list:
+            log_info(f"Main orquestrando download de: {filename}")
+            filepath = os.path.join(SHARED_FOLDER, filename)
+
+            # Descobrir a porta TCP do nó remetente consultando o discovery
+            porta_remota = self.server.porta
+            active_nodes = self.discovery.get_active_nodes()
+            if remote_node_id in active_nodes:
+                porta_remota = active_nodes[remote_node_id]["tcp_port"]
+
+            def ejecutar_fluxo_download(f_name, path, ip, port):
+                try:
+                    # Ativa a proteção contra efeito eco no watchdog local
+                    self.watcher.mark_syncing(f_name)
+
+                    # Realiza o download físico dos chunks via cliente TCP
+                    TCPClient.request_file(ip, port, f_name, path)
+
+                    # Atualiza o banco de dados local com as informações reais pós-download
+                    f_hash = self.file_manager.get_file_hash(path)
+                    size = self.file_manager.get_file_size(path)
+                    self.state_db.update_file_state(f_name, f_hash, time.time(), size)
+                except Exception as err:
+                    log_error(f"Erro na main ao baixar arquivo {f_name}: {err}")
+                finally:
+                    # Libera a proteção de forma atrasada para o filesystem assentar
+                    self.watcher.release_syncing(f_name, delay=1.5)
+
+            # Executa como tarefa curta - Correção de 'remote_ip' injetado com sucesso aqui:
+            self._start_one_off(
+                target=ejecutar_fluxo_download,
+                args=(filename, filepath, remote_ip, porta_remota),
+                name=f"download-{filename[:8]}",
+            )
+
+        # 2. Processar Deleções locais solicitadas pela árvore de sincronização com proteção do Guard
+        for filename in delete_list:
+            estado = self.state_db.get_file_state(filename)
+            if estado and estado["status"] == "ACTIVE":
+                log_info(f"Main aplicando deleção segura de: {filename}")
+                filepath = os.path.join(SHARED_FOLDER, filename)
+                try:
+                    # Blindagem ativa para o watchdog local não retransmitir a própria deleção vinda da rede
+                    self.watcher.mark_syncing(filename)
+                    self.state_db.mark_deleted(filename, time.time())
+                    self.file_manager.delete_file(filepath)
+                finally:
+                    self.watcher.release_syncing(filename, delay=1.5)
 
     def scan_initial(self):
         """atualiza o banco com o conteúdo atual da pasta compartilhada."""
@@ -110,7 +169,9 @@ class SyncNode:
 
         # tcp_server.start() possui um loop while True bloqueante; a thread daemon
         # permite que os outros componentes continuem inicializando em paralelo.
-        tcp_thread = threading.Thread(target=self.server.start, name="tcp-server-main", daemon=True)
+        tcp_thread = threading.Thread(
+            target=self.server.start, name="tcp-server-main", daemon=True
+        )
         tcp_thread.start()
         self.threads.append(tcp_thread)
 
@@ -207,9 +268,13 @@ class SyncNode:
     def _heartbeat_loop(self):
         # heartbeat verifica a disponibilidade tcp; expiração definitiva continua no discovery
         while not self.stop_event.wait(HEARTBEAT_INTERVAL):
-            message = build_message(MSG_HEARTBEAT, node_id=NODE_ID, timestamp=time.time())
+            message = build_message(
+                MSG_HEARTBEAT, node_id=NODE_ID, timestamp=time.time()
+            )
             for node_id, node in self.discovery.get_active_nodes().items():
-                response = TCPClient.send_and_receive(node["ip"], node["tcp_port"], message)
+                response = TCPClient.send_and_receive(
+                    node["ip"], node["tcp_port"], message
+                )
                 if response is None:
                     log_warn(f"heartbeat sem resposta: {node_id}")
 

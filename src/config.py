@@ -32,9 +32,9 @@ DB_PATH = os.path.join(BASE_DIR, 'state.json')
 
 # ─── Parâmetros de Sincronização ────────────────────────────────────
 CHUNK_SIZE = 4096                # Tamanho de cada pedaço para leitura/envio
-HEARTBEAT_INTERVAL = 15          # Segundos entre heartbeats
-NODE_TIMEOUT = 45                # Segundos sem heartbeat → nó considerado morto
-DISCOVERY_INTERVAL = 30          # Segundos entre broadcasts UDP
+HEARTBEAT_INTERVAL = 10          # Segundos entre heartbeats
+NODE_TIMEOUT = 60                # Segundos sem heartbeat → nó considerado morto
+DISCOVERY_INTERVAL = 5          # Segundos entre broadcasts UDP
 SYNC_INTERVAL = 300              # Segundos entre sincronizações periódicas completas
 DEBOUNCE_DELAY = 0.5             # Segundos de debounce para eventos do watchdog
 

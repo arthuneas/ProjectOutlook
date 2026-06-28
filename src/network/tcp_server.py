@@ -55,12 +55,16 @@ import os
 
 class TCPServer:
     # dessa vez, diferente do tcp_client, é necessário um construtor pois o servidor é stateful! É necessário guardar informações
-    def __init__(self, state_db, file_manager, reconciler, discovery):  # construtor
+    def __init__(
+        self, state_db, file_manager, reconciler, discovery, on_index_reconciled=None
+    ):  # construtor
         self.state_db = state_db
         self.file_manager = file_manager
         self.reconciler = reconciler
         self.discovery = discovery
         self.porta = TCP_PORT
+        self.on_index_reconciled = on_index_reconciled  # guarda a referência da main
+        self.watcher = None
 
     def start(self):
         try:
@@ -80,18 +84,18 @@ class TCPServer:
 
             # feedback cli
             log_info("Servidor TCP ligado e aguardando conexões...")
-            
+
             while True:
-              sock_cliente, endereco_cliente = server_socketTCP.accept()
-              thread_nova = threading.Thread(
-                  target=self._handle_client,
-                  args=(
-                      sock_cliente,
-                      endereco_cliente,
-                  ),
-                  daemon=True,
-              )
-              thread_nova.start()
+                sock_cliente, endereco_cliente = server_socketTCP.accept()
+                thread_nova = threading.Thread(
+                    target=self._handle_client,
+                    args=(
+                        sock_cliente,
+                        endereco_cliente,
+                    ),
+                    daemon=True,
+                )
+                thread_nova.start()
 
         except Exception as e:
             log_error(f"Falha ao iniciar o servidor TCP na porta {self.porta}: {e}")
@@ -165,6 +169,12 @@ class TCPServer:
                 indice_local, indice_remoto, NODE_ID, node_id_remoto
             )
 
+            if self.on_index_reconciled:
+                ip_remoto = sock_cliente.getpeername()[0]
+                self.on_index_reconciled(
+                    node_id_remoto, ip_remoto, download_list, upload_list, delete_list
+                )
+
         except Exception as e:
             log_error(f"Erro ao processar reconciliação dos índices: {e}")
 
@@ -173,7 +183,6 @@ class TCPServer:
     # ─────────────────────────────── Implementando o _handle_file_request ───────────────────────────────
     def _handle_file_request(self, msg, sock_cliente):
         nome_arquivo = msg["filename"]
-        # pegando o caminho:
         caminho_completo = os.path.join(SHARED_FOLDER, nome_arquivo)
 
         if not os.path.exists(caminho_completo):
@@ -183,7 +192,6 @@ class TCPServer:
             return
 
         try:
-            # guardando informações do arquivo
             tamanho = self.file_manager.get_file_size(caminho_completo)
             hash_arquivo = self.file_manager.get_file_hash(caminho_completo)
 
@@ -195,8 +203,13 @@ class TCPServer:
             )
             send_message(sock_cliente, msg_start)
 
-            # agora vou enviar em chunks o arquivo atraves do yield do FileManager
-            for bloco_base64 in self.file_manager.read_file_chunks(caminho_completo):
+            import base64  # Certifique-se de importar o base64 se já não estiver no topo
+
+            # Agora vamos enviar em chunks o arquivo através do yield do FileManager
+            for bloco_binario in self.file_manager.read_file_chunks(caminho_completo):
+                # ─── CORREÇÃO AQUI: Converte os bytes crus para uma string de texto Base64 segura para JSON ───
+                bloco_base64 = base64.b64encode(bloco_binario).decode("utf-8")
+
                 msg_chunk = build_message(
                     MSG_FILE_CHUNK,
                     filename=nome_arquivo,
@@ -205,7 +218,7 @@ class TCPServer:
                 )
                 send_message(sock_cliente, msg_chunk)
 
-            # informando o chunk final
+            # Informando o chunk final
             msg_final = build_message(
                 MSG_FILE_CHUNK, filename=nome_arquivo, data="", is_last=True
             )
@@ -220,18 +233,61 @@ class TCPServer:
     # ─────────────────────────────── Implementando o _handle_file_notify ───────────────────────────────
     def _handle_file_notify(self, msg, sock_cliente):
         nome_arquivo = msg["filename"]
-        timestamp_remoto = msg["timestamp"]
+        timestamp_remoto = float(msg["timestamp"])
+        node_id_remoto = msg.get("node_id")
 
-        # pegando as info no banco de dados
         estado_local = self.state_db.get_file_state(nome_arquivo)
 
-        # caso o servidor não conheça o arquivo ou houve uma alteração mais recente do que a que possuo
-        if estado_local is None or timestamp_remoto > estado_local["timestamp"]:
-            # irei avisar que ainda preciso me atualizar
+        # Se o arquivo for novo ou tiver timestamp mais recente, vamos baixar
+        if estado_local is None or timestamp_remoto > float(estado_local["timestamp"]):
             log_sync(
-                "Notificação: Mudança detectada em nó remoto para o arquivo: "
-                + nome_arquivo
+                f"Notificação: Mudança detectada no remoto para {nome_arquivo}. Agendando download..."
             )
+
+            ip_remoto = sock_cliente.getpeername()[0]
+            porta_remota = self.porta
+            with self.discovery.lock:
+                if node_id_remoto in self.discovery.known_nodes:
+                    porta_remota = self.discovery.known_nodes[node_id_remoto][
+                        "tcp_port"
+                    ]
+
+            caminho_salvar = os.path.join(SHARED_FOLDER, nome_arquivo)
+
+            def rodar_download_background():
+                from .tcp_client import TCPClient
+
+                time.sleep(0.1)
+                try:
+                    # ─── ATIVA A BLINDAGEM CONTRA LOOP (Evita o efeito eco) ───
+                    if hasattr(self, "watcher") and self.watcher:
+                        self.watcher.mark_syncing(nome_arquivo)
+
+                    log_sync(
+                        f"Iniciando download seguro via P2P para o arquivo {nome_arquivo}"
+                    )
+                    TCPClient.request_file(
+                        ip_remoto, porta_remota, nome_arquivo, caminho_salvar
+                    )
+
+                    hash_local = FileManager.get_file_hash(caminho_salvar)
+                    tamanho_local = FileManager.get_file_size(caminho_salvar)
+
+                    # Salva no SQLite
+                    self.state_db.update_file_state(
+                        nome_arquivo, hash_local, timestamp_remoto, tamanho_local
+                    )
+                    log_sync(f"Arquivo {nome_arquivo} integrado e gravado com sucesso!")
+                except Exception as ex:
+                    log_error(
+                        f"Erro ao processar download em background para {nome_arquivo}: {ex}"
+                    )
+                finally:
+                    # ─── LIBERA A BLINDAGEM DEPOIS QUE O ARQUIVO ESTABILIZOU NO DISCO ───
+                    if hasattr(self, "watcher") and self.watcher:
+                        self.watcher.release_syncing(nome_arquivo, delay=1.5)
+
+            threading.Thread(target=rodar_download_background, daemon=True).start()
 
     # ─────────────────────────────── Implementando o _handle_delete_notify ───────────────────────────────
     def _handle_delete_notify(self, msg, sock_cliente):
