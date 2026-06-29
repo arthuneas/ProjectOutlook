@@ -4,10 +4,6 @@ cli.py — Interface de linha de comando e funções de log.
 Fornece funções de log formatadas com timestamp, nome do nó e cores ANSI.
 Todos os módulos do projeto devem usar estas funções para output no terminal.
 
-TODO (Grupo):
-  - Implementar log_info(), log_error(), log_warn(), log_sync()
-  - Usar códigos ANSI para cores (verde, vermelho, amarelo, ciano)
-  - Formato: [HH:MM:SS] [NodeName] [TIPO] mensagem
 """
 
 # Códigos de cor ANSI:
