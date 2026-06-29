@@ -1,14 +1,8 @@
 """
 config.py — Configurações centralizadas do nó SyncP2P.
 
-Todas as constantes de rede, caminhos e identificação ficam aqui.
-Ao precisar mudar uma porta ou caminho, mude APENAS neste arquivo.
-
-TODO (Grupo):
-  - Ajustar portas se necessário
-  - Adicionar suporte a SEED_NODES para Docker
-  - Configurar CHUNK_SIZE ideal para transferência
 """
+
 
 import os
 import uuid

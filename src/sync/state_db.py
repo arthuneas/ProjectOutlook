@@ -8,7 +8,7 @@ Responsabilidades:
   4. Marcar arquivos como DELETED (tombstone) — NÃO REMOVER do banco
   5. Thread-safe: proteger leitura/escrita com Lock
 
-TOMBSTONES (IMPORTANTE):
+IMPORTANTE:
   Quando um arquivo é deletado, NÃO remova a entrada do banco.
   Mude o status para "DELETED" e atualize o timestamp.
   Se você remover, na próxima INDEX_EXCHANGE o nó vai pensar que

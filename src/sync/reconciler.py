@@ -22,7 +22,6 @@ LÓGICA DE COMPARAÇÃO:
 
   Para cada arquivo LOCAL que NÃO está no remoto:
     → O remoto precisa baixar de mim (upload)
-
 """
 
 
